@@ -11,6 +11,9 @@
 //! This simulation is moderately expensive. You'll generally want to avoid more
 //! than 32-64 HRTF emitters, especially on less powerful devices.
 
+#![warn(missing_debug_implementations)]
+#![warn(missing_docs)]
+
 use firewheel::{
     channel_config::{ChannelConfig, NonZeroChannelCount},
     diff::{Diff, Patch},
@@ -26,15 +29,25 @@ mod subjects;
 pub use subjects::{Subject, SubjectBytes};
 
 /// Head-related transfer function (HRTF) node.
+///
+/// HRTFs can provide far more convincing spatialization
+/// compared to simpler techniques. They simulate the way
+/// our bodies filter sounds based on where they’re coming from,
+/// allowing you to distinguish up/down, front/back,
+/// and the more typical left/right.
+///
+/// This simulation is moderately expensive. You’ll generally
+/// want to avoid more than 32-64 HRTF emitters, especially on
+/// less powerful devices.
 #[derive(Debug, Default, Clone, Diff, Patch)]
 #[cfg_attr(feature = "bevy", derive(bevy_ecs::component::Component))]
 #[cfg_attr(feature = "bevy_reflect", derive(bevy_reflect::Reflect))]
-pub struct FyroxHrtfNode {
+pub struct HrtfNode {
     /// The positional offset from the listener to the emitter.
     pub offset: Vec3,
 }
 
-/// Configuration for [`FyroxHrtfNode`].
+/// Configuration for [`HrtfNode`].
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "bevy", derive(bevy_ecs::component::Component))]
 #[cfg_attr(feature = "bevy_reflect", derive(bevy_reflect::Reflect))]
@@ -54,8 +67,7 @@ pub struct HrtfConfig {
     /// ear canal. The resulting recordings capture how sounds are affected
     /// by the subject's torso, head, and ears.
     ///
-    /// The effect can be rather personal as a result, but the
-    /// `IRC_1040` subject is commonly sited as a good default.
+    /// Defaults to `HrirSource::Embedded(Subject::Irc1040)`.
     pub hrir_sphere: HrirSource,
 
     /// The size of the FFT processing block, which can be
@@ -84,12 +96,12 @@ pub struct FftSize {
     /// The number of slices the audio stream is split into for overlap-save.
     ///
     /// Defaults to 4.
-    slice_count: usize,
+    pub slice_count: usize,
 
     /// The size of each slice.
     ///
     /// Defaults to 128.
-    slice_len: usize,
+    pub slice_len: usize,
 }
 
 impl Default for FftSize {
@@ -134,7 +146,7 @@ impl From<SubjectBytes> for HrirSource {
     }
 }
 
-impl AudioNode for FyroxHrtfNode {
+impl AudioNode for HrtfNode {
     type Configuration = HrtfConfig;
 
     fn info(&self, config: &Self::Configuration) -> AudioNodeInfo {
@@ -209,7 +221,7 @@ impl AudioNodeProcessor for FyroxHrtfProcessor {
         let mut previous_vector = self.offset;
         let mut previous_gain = distance_gain(self.distance);
 
-        for FyroxHrtfNodePatch::Offset(offset) in events.drain_patches::<FyroxHrtfNode>() {
+        for HrtfNodePatch::Offset(offset) in events.drain_patches::<HrtfNode>() {
             // TODO: this might not be correct if the event rate is faster
             // than the FFT processing rate.
             self.distance = offset.length().max(0.01);

@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use firewheel::collector::ArcGc;
 
-/// The HRIR subject.
+/// HRIR subjects embedded directly in the binary.
 ///
 /// The embedded subjects were chosen at complete random, expect for 1040.
 /// There are many more available from the
@@ -41,6 +41,8 @@ pub enum Subject {
     #[cfg(feature = "irc1034")]
     Irc1034,
     /// Male, short hair.
+    ///
+    /// Commonly cited as a good default subject.
     #[default]
     Irc1040,
     /// Male, bulky hairstyle.
@@ -89,6 +91,7 @@ impl AsRef<[u8]> for Subject {
 pub struct SubjectBytes(ArcGc<[u8]>);
 
 impl SubjectBytes {
+    /// Copy `bytes` into a reference-counted [`SubjectBytes`].
     pub fn new(bytes: &[u8]) -> Self {
         Self(ArcGc::new_unsized(|| Arc::from(bytes)))
     }

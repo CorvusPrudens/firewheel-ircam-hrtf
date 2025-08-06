@@ -1,8 +1,15 @@
-//! Head-related transfer function (HRTF) node.
+//! A head-related transfer function (HRTF) node for
+//! [Firewheel](https://github.com/BillyDM/Firewheel),
+//! powered by [Fyrox](https://docs.rs/hrtf/latest/hrtf/)'s
+//! [IRCAM](http://recherche.ircam.fr/equipes/salles/listen/download.html)-based HRIR.
 //!
-//! This crate utilizes Fyrox's [hrtf](https://docs.rs/hrtf/latest/hrtf/)
-//! crate, with impulse response data from the
-//! [IRCAM database](http://recherche.ircam.fr/equipes/salles/listen/download.html).
+//! HRTFs can provide far more convincing spatialization compared to
+//! simpler techniques. They simulate the way our bodies filter sounds
+//! based on where they're coming from, allowing you to distinguish up/down,
+//! front/back, and the more typical left/right.
+//!
+//! This simulation is moderately expensive. You'll generally want to avoid more
+//! than 32-64 HRTF emitters, especially on less powerful devices.
 
 use firewheel::{
     channel_config::{ChannelConfig, NonZeroChannelCount},

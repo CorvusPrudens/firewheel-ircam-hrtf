@@ -17,8 +17,11 @@
 use firewheel::{
     channel_config::{ChannelConfig, NonZeroChannelCount},
     diff::{Diff, Patch},
-    log::RealtimeLogger,
-    node::{AudioNode, AudioNodeInfo, AudioNodeProcessor, ProcBuffers, ProcessStatus},
+    event::ProcEvents,
+    node::{
+        AudioNode, AudioNodeInfo, AudioNodeProcessor, ProcBuffers, ProcExtra, ProcInfo,
+        ProcessStatus,
+    },
 };
 use glam::Vec3;
 use hrtf::{HrirSphere, HrtfContext, HrtfProcessor};
@@ -211,12 +214,10 @@ fn distance_gain(distance: f32) -> f32 {
 impl AudioNodeProcessor for FyroxHrtfProcessor {
     fn process(
         &mut self,
-        ProcBuffers {
-            inputs, outputs, ..
-        }: ProcBuffers,
-        proc_info: &firewheel::node::ProcInfo,
-        events: &mut firewheel::event::NodeEventList,
-        _: &mut RealtimeLogger,
+        proc_info: &ProcInfo,
+        ProcBuffers { inputs, outputs }: ProcBuffers,
+        events: &mut ProcEvents,
+        _: &mut ProcExtra,
     ) -> ProcessStatus {
         let mut previous_vector = self.offset;
         let mut previous_gain = distance_gain(self.distance);

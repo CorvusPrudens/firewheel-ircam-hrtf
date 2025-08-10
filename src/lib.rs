@@ -22,8 +22,8 @@ use firewheel::{
         AudioNode, AudioNodeInfo, AudioNodeProcessor, ProcBuffers, ProcExtra, ProcInfo,
         ProcessStatus,
     },
-    vector::Vec3,
 };
+use glam::Vec3;
 use hrtf::{HrirSphere, HrtfContext, HrtfProcessor};
 use std::io::Cursor;
 
@@ -211,19 +211,6 @@ fn distance_gain(distance: f32) -> f32 {
     10.0f32.powf(-0.03 * distance)
 }
 
-fn length(vec: &Vec3) -> f32 {
-    (vec.x * vec.x + vec.y * vec.y + vec.z * vec.z).sqrt()
-}
-
-fn normalize_or(vec: Vec3, fallback: Vec3) -> Vec3 {
-    let len = length(&vec);
-    if len > 0.0 {
-        Vec3::new(vec.x / len, vec.y / len, vec.z / len)
-    } else {
-        fallback
-    }
-}
-
 impl AudioNodeProcessor for FyroxHrtfProcessor {
     fn process(
         &mut self,
@@ -238,8 +225,8 @@ impl AudioNodeProcessor for FyroxHrtfProcessor {
         for HrtfNodePatch::Offset(offset) in events.drain_patches::<HrtfNode>() {
             // TODO: this might not be correct if the event rate is faster
             // than the FFT processing rate.
-            self.distance = length(&offset).max(0.01);
-            self.offset = normalize_or(offset, Vec3::new(0.0, 0.0, 1.0));
+            self.distance = offset.length().max(0.01);
+            self.offset = offset.normalize_or(Vec3::Y);
         }
 
         if proc_info.in_silence_mask.all_channels_silent(inputs.len()) {

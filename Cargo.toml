@@ -2,7 +2,7 @@
 name = "firewheel-ircam-hrtf"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.88.0"
+rust-version = "1.85.0"
 license = "MIT OR Apache-2.0"
 authors = ["Corvus Prudens <corvusprudens@gmail.com>"]
 description = "Head-related transfer function (HRTF) node for Firewheel"
@@ -31,8 +31,8 @@ include = [
 ]
 
 [dependencies]
-firewheel = { version = "0.6.4-beta.0", default-features = false, features = [
-  "glam",
+firewheel = { version = "0.7.1", default-features = false, features = [
+  "glam-29",
 ] }
 glam = { version = "0.29", default-features = false, features = ["std"] }
 hrtf = "0.8.1"

@@ -11,11 +11,19 @@
 //! This simulation is moderately expensive. You'll generally want to avoid more
 //! than 32-64 HRTF emitters, especially on less powerful devices.
 
+#![cfg_attr(docsrs, feature(doc_auto_cfg))]
+#![warn(missing_debug_implementations)]
+#![warn(missing_docs)]
+
 use firewheel::{
     channel_config::{ChannelConfig, NonZeroChannelCount},
     diff::{Diff, Patch},
-    log::RealtimeLogger,
-    node::{AudioNode, AudioNodeInfo, AudioNodeProcessor, ProcBuffers, ProcessStatus},
+    dsp::distance_attenuation::DistanceAttenuatorStereoDsp,
+    event::ProcEvents,
+    node::{
+        AudioNode, AudioNodeInfo, AudioNodeProcessor, ProcBuffers, ProcExtra, ProcInfo,
+        ProcessStatus,
+    },
 };
 use glam::Vec3;
 use hrtf::{HrirSphere, HrtfContext, HrtfProcessor};
@@ -23,18 +31,67 @@ use std::io::Cursor;
 
 mod subjects;
 
+pub use firewheel::dsp::distance_attenuation::{DistanceAttenuation, DistanceModel};
 pub use subjects::{Subject, SubjectBytes};
 
 /// Head-related transfer function (HRTF) node.
-#[derive(Debug, Default, Clone, Diff, Patch)]
+///
+/// HRTFs can provide far more convincing spatialization
+/// compared to simpler techniques. They simulate the way
+/// our bodies filter sounds based on where they’re coming from,
+/// allowing you to distinguish up/down, front/back,
+/// and the more typical left/right.
+///
+/// This simulation is moderately expensive. You’ll generally
+/// want to avoid more than 32-64 HRTF emitters, especially on
+/// less powerful devices.
+#[derive(Debug, Clone, Diff, Patch)]
 #[cfg_attr(feature = "bevy", derive(bevy_ecs::component::Component))]
 #[cfg_attr(feature = "bevy_reflect", derive(bevy_reflect::Reflect))]
-pub struct FyroxHrtfNode {
+pub struct HrtfNode {
     /// The positional offset from the listener to the emitter.
     pub offset: Vec3,
+
+    /// The amount of muffling (lowpass) in the range `[20.0, 20_480.0]`,
+    /// where `20_480.0` is no muffling and `20.0` is maximum muffling.
+    ///
+    /// This can be used to give the effect of a sound being played behind a wall
+    /// or underwater.
+    ///
+    /// By default this is set to `20_480.0`.
+    ///
+    /// See <https://www.desmos.com/calculator/jxp8t9ero4> for an interactive graph of
+    /// how these parameters affect the final lowpass cuttoff frequency.
+    pub muffle_cutoff_hz: f32,
+
+    /// Distance attenuation parameters.
+    pub distance_attenuation: DistanceAttenuation,
+
+    /// The time in seconds of the internal smoothing filter.
+    ///
+    /// By default this is set to `0.015` (15ms).
+    pub smooth_seconds: f32,
+
+    /// If the resutling gain (in raw amplitude, not decibels) is less than or equal
+    /// to this value, the the gain will be clamped to `0` (silence).
+    ///
+    /// By default this is set to "0.0001" (-80 dB).
+    pub min_gain: f32,
 }
 
-/// Configuration for [`FyroxHrtfNode`].
+impl Default for HrtfNode {
+    fn default() -> Self {
+        Self {
+            offset: Vec3::ZERO,
+            muffle_cutoff_hz: 20480.0,
+            distance_attenuation: Default::default(),
+            smooth_seconds: 0.015,
+            min_gain: 0.0001,
+        }
+    }
+}
+
+/// Configuration for [`HrtfNode`].
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "bevy", derive(bevy_ecs::component::Component))]
 #[cfg_attr(feature = "bevy_reflect", derive(bevy_reflect::Reflect))]
@@ -54,8 +111,7 @@ pub struct HrtfConfig {
     /// ear canal. The resulting recordings capture how sounds are affected
     /// by the subject's torso, head, and ears.
     ///
-    /// The effect can be rather personal as a result, but the
-    /// `IRC_1040` subject is commonly sited as a good default.
+    /// Defaults to `HrirSource::Embedded(Subject::Irc1040)`.
     pub hrir_sphere: HrirSource,
 
     /// The size of the FFT processing block, which can be
@@ -84,12 +140,12 @@ pub struct FftSize {
     /// The number of slices the audio stream is split into for overlap-save.
     ///
     /// Defaults to 4.
-    slice_count: usize,
+    pub slice_count: usize,
 
     /// The size of each slice.
     ///
     /// Defaults to 128.
-    slice_len: usize,
+    pub slice_len: usize,
 }
 
 impl Default for FftSize {
@@ -134,7 +190,7 @@ impl From<SubjectBytes> for HrirSource {
     }
 }
 
-impl AudioNode for FyroxHrtfNode {
+impl AudioNode for HrtfNode {
     type Configuration = HrtfConfig;
 
     fn info(&self, config: &Self::Configuration) -> AudioNodeInfo {
@@ -166,8 +222,17 @@ impl AudioNode for FyroxHrtfNode {
         let buffer_size = cx.stream_info.max_block_frames.get() as usize;
         FyroxHrtfProcessor {
             renderer,
+            attenuation: self.distance_attenuation,
+            attenuation_processor: DistanceAttenuatorStereoDsp::new(
+                firewheel::param::smoother::SmootherConfig {
+                    smooth_seconds: self.smooth_seconds,
+                    ..Default::default()
+                },
+                cx.stream_info.sample_rate,
+            ),
+            muffle_cutoff_hz: self.muffle_cutoff_hz,
             offset: self.offset,
-            distance: 1.0,
+            min_gain: self.min_gain,
             fft_input: Vec::with_capacity(fft_buffer_len),
             fft_output: Vec::with_capacity(buffer_size.max(fft_buffer_len)),
             prev_left_samples: Vec::with_capacity(fft_buffer_len),
@@ -181,7 +246,10 @@ impl AudioNode for FyroxHrtfNode {
 struct FyroxHrtfProcessor {
     renderer: HrtfProcessor,
     offset: Vec3,
-    distance: f32,
+    attenuation: DistanceAttenuation,
+    attenuation_processor: DistanceAttenuatorStereoDsp,
+    muffle_cutoff_hz: f32,
+    min_gain: f32,
     fft_input: Vec<f32>,
     fft_output: Vec<(f32, f32)>,
     prev_left_samples: Vec<f32>,
@@ -190,37 +258,52 @@ struct FyroxHrtfProcessor {
     fft_size: FftSize,
 }
 
-/// Here we utilize the same fall-off that Firewheel's
-/// built-in `SpatialBasic` node does.
-fn distance_gain(distance: f32) -> f32 {
-    10.0f32.powf(-0.03 * distance)
-}
-
 impl AudioNodeProcessor for FyroxHrtfProcessor {
     fn process(
         &mut self,
-        ProcBuffers {
-            inputs, outputs, ..
-        }: ProcBuffers,
-        proc_info: &firewheel::node::ProcInfo,
-        events: &mut firewheel::event::NodeEventList,
-        _: &mut RealtimeLogger,
+        proc_info: &ProcInfo,
+        ProcBuffers { inputs, outputs }: ProcBuffers,
+        events: &mut ProcEvents,
+        _: &mut ProcExtra,
     ) -> ProcessStatus {
         let mut previous_vector = self.offset;
-        let mut previous_gain = distance_gain(self.distance);
 
-        for FyroxHrtfNodePatch::Offset(offset) in events.drain_patches::<FyroxHrtfNode>() {
-            // TODO: this might not be correct if the event rate is faster
-            // than the FFT processing rate.
-            self.distance = offset.length().max(0.01);
-            self.offset = offset.normalize_or(Vec3::Y);
+        for patch in events.drain_patches::<HrtfNode>() {
+            match patch {
+                HrtfNodePatch::Offset(offset) => {
+                    let distance = offset.length().max(0.01);
+
+                    self.attenuation_processor.compute_values(
+                        distance,
+                        &self.attenuation,
+                        self.muffle_cutoff_hz,
+                        self.min_gain,
+                    );
+
+                    self.offset = offset.normalize_or(Vec3::Y);
+                }
+                HrtfNodePatch::MuffleCutoffHz(muffle) => {
+                    self.muffle_cutoff_hz = muffle;
+                }
+                HrtfNodePatch::DistanceAttenuation(a) => {
+                    self.attenuation.apply(a);
+                }
+                HrtfNodePatch::SmoothSeconds(s) => {
+                    self.attenuation_processor
+                        .set_smooth_seconds(s, proc_info.sample_rate);
+                }
+                HrtfNodePatch::MinGain(g) => {
+                    self.min_gain = g;
+                }
+            }
         }
 
         if proc_info.in_silence_mask.all_channels_silent(inputs.len()) {
+            self.attenuation_processor.reset();
+
             return ProcessStatus::ClearAllOutputs;
         }
 
-        let current_gain = distance_gain(self.distance);
         for frame in 0..proc_info.frames {
             let mut downmixed = 0.0;
             for channel in inputs {
@@ -250,15 +333,14 @@ impl AudioNodeProcessor for FyroxHrtfProcessor {
                     ),
                     prev_left_samples: &mut self.prev_left_samples,
                     prev_right_samples: &mut self.prev_right_samples,
-                    new_distance_gain: current_gain,
-                    prev_distance_gain: previous_gain,
+                    new_distance_gain: 1.0,
+                    prev_distance_gain: 1.0,
                 };
 
                 self.renderer.process_samples(context);
 
                 // in case we call this multiple times
                 previous_vector = self.offset;
-                previous_gain = current_gain;
                 self.fft_input.clear();
             }
         }
@@ -272,7 +354,20 @@ impl AudioNodeProcessor for FyroxHrtfProcessor {
             outputs[1][i] = right;
         }
 
-        ProcessStatus::outputs_not_silent()
+        let (left, rest) = outputs.split_first_mut().unwrap();
+        let clear_outputs = self.attenuation_processor.process(
+            proc_info.frames,
+            left,
+            rest[0],
+            proc_info.sample_rate_recip,
+        );
+
+        if clear_outputs {
+            self.attenuation_processor.reset();
+            ProcessStatus::ClearAllOutputs
+        } else {
+            ProcessStatus::outputs_not_silent()
+        }
     }
 
     fn new_stream(&mut self, stream_info: &firewheel::StreamInfo) {

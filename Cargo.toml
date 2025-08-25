@@ -30,6 +30,9 @@ include = [
   "assets/irc_1053_c.bin",
 ]
 
+[package.metadata.docs.rs]
+all-features = true
+
 [dependencies]
 firewheel = { version = "0.7.1", default-features = false, features = [
   "glam-29",

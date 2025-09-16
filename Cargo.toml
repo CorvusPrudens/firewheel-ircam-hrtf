@@ -35,16 +35,16 @@ all-features = true
 
 [dependencies]
 firewheel = { version = "0.7.1", default-features = false, features = [
-  "glam-29",
+  "glam-30",
 ] }
 glam = { version = "0.29", default-features = false, features = ["std"] }
 hrtf = "0.8.1"
 
 # Bevy dependencies
-bevy_ecs = { version = "0.16.1", default-features = false, features = [
+bevy_ecs = { version = "0.17.0-rc.1", default-features = false, features = [
   "std",
 ], optional = true }
-bevy_reflect = { version = "0.16.1", default-features = false, features = [
+bevy_reflect = { version = "0.17.0-rc.1", default-features = false, features = [
   "glam",
   "std",
 ], optional = true }
@@ -80,3 +80,6 @@ irc1034 = []
 irc1042 = []
 irc1052 = []
 irc1053 = []
+
+[patch.crates-io]
+firewheel = { git = "https://github.com/dsgallups/Firewheel.git", branch = "0.17-rc1"}

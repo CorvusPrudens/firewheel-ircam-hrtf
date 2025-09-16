@@ -1,6 +1,6 @@
 [package]
 name = "firewheel-ircam-hrtf"
-version = "0.1.1"
+version = "0.2.0-rc.1"
 edition = "2024"
 rust-version = "1.85.0"
 license = "MIT OR Apache-2.0"
@@ -34,7 +34,7 @@ include = [
 all-features = true
 
 [dependencies]
-firewheel = { version = "0.7.1", default-features = false, features = [
+firewheel = { version = "0.8.0-rc.1", default-features = false, features = [
   "glam-30",
 ] }
 glam = { version = "0.30", default-features = false, features = ["std"] }
@@ -80,6 +80,3 @@ irc1034 = []
 irc1042 = []
 irc1052 = []
 irc1053 = []
-
-[patch.crates-io]
-firewheel = { git = "https://github.com/dsgallups/Firewheel.git", branch = "0.17-rc1"}

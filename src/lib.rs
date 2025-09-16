@@ -18,7 +18,7 @@
 use firewheel::{
     channel_config::{ChannelConfig, NonZeroChannelCount},
     diff::{Diff, Patch},
-    dsp::distance_attenuation::DistanceAttenuatorStereoDsp,
+    dsp::{coeff_update::CoeffUpdateFactor, distance_attenuation::DistanceAttenuatorStereoDsp},
     event::ProcEvents,
     node::{
         AudioNode, AudioNodeInfo, AudioNodeProcessor, ProcBuffers, ProcExtra, ProcInfo,
@@ -77,6 +77,19 @@ pub struct HrtfNode {
     ///
     /// By default this is set to "0.0001" (-80 dB).
     pub min_gain: f32,
+
+    /// An exponent representing the rate at which DSP coefficients are
+    /// updated when parameters are being smoothed.
+    ///
+    /// Smaller values will produce less "stair-stepping" artifacts,
+    /// but will also consume more CPU.
+    ///
+    /// The resulting number of frames (samples in a single channel of audio)
+    /// that will elapse between each update is calculated as
+    /// `2^coeff_update_factor`.
+    ///
+    /// By default this is set to `5`.
+    pub coeff_update_factor: CoeffUpdateFactor,
 }
 
 impl Default for HrtfNode {
@@ -87,6 +100,7 @@ impl Default for HrtfNode {
             distance_attenuation: Default::default(),
             smooth_seconds: 0.015,
             min_gain: 0.0001,
+            coeff_update_factor: CoeffUpdateFactor(5),
         }
     }
 }
@@ -229,6 +243,7 @@ impl AudioNode for HrtfNode {
                     ..Default::default()
                 },
                 cx.stream_info.sample_rate,
+                self.coeff_update_factor,
             ),
             muffle_cutoff_hz: self.muffle_cutoff_hz,
             offset: self.offset,
@@ -294,6 +309,9 @@ impl AudioNodeProcessor for FyroxHrtfProcessor {
                 }
                 HrtfNodePatch::MinGain(g) => {
                     self.min_gain = g;
+                }
+                HrtfNodePatch::CoeffUpdateFactor(c) => {
+                    self.attenuation_processor.set_coeff_update_factor(c);
                 }
             }
         }

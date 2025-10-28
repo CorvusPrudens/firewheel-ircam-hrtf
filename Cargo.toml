@@ -1,6 +1,6 @@
 [package]
 name = "firewheel-ircam-hrtf"
-version = "0.2.0-rc.1"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.85.0"
 license = "MIT OR Apache-2.0"
@@ -34,17 +34,17 @@ include = [
 all-features = true
 
 [dependencies]
-firewheel = { version = "0.8.0-rc.1", default-features = false, features = [
+firewheel = { version = "0.9.0", default-features = false, features = [
   "glam-30",
 ] }
 glam = { version = "0.30", default-features = false, features = ["std"] }
 hrtf = "0.8.1"
 
 # Bevy dependencies
-bevy_ecs = { version = "0.17.0-rc.1", default-features = false, features = [
+bevy_ecs = { version = "0.17.2", default-features = false, features = [
   "std",
 ], optional = true }
-bevy_reflect = { version = "0.17.0-rc.1", default-features = false, features = [
+bevy_reflect = { version = "0.17.2", default-features = false, features = [
   "glam",
   "std",
 ], optional = true }

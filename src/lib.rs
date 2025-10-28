@@ -384,11 +384,15 @@ impl AudioNodeProcessor for FyroxHrtfProcessor {
             self.attenuation_processor.reset();
             ProcessStatus::ClearAllOutputs
         } else {
-            ProcessStatus::outputs_not_silent()
+            ProcessStatus::OutputsModified
         }
     }
 
-    fn new_stream(&mut self, stream_info: &firewheel::StreamInfo) {
+    fn new_stream(
+        &mut self,
+        stream_info: &firewheel::StreamInfo,
+        _store: &mut firewheel::node::ProcStreamCtx,
+    ) {
         if stream_info.prev_sample_rate != stream_info.sample_rate {
             let sample_rate = stream_info.sample_rate.get();
 

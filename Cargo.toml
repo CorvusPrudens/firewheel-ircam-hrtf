@@ -35,10 +35,10 @@ all-features = true
 
 [dependencies]
 firewheel = { version = "0.10.0", default-features = false, features = [
-  "glam-30",
+  "glam-31",
   "std",
 ] }
-glam = { version = "0.30", default-features = false, features = ["std"] }
+glam = { version = "0.31", default-features = false, features = ["std"] }
 hrtf = "0.8.1"
 
 # Bevy dependencies

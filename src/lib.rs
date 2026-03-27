@@ -21,7 +21,7 @@ use firewheel::{
     dsp::{coeff_update::CoeffUpdateFactor, distance_attenuation::DistanceAttenuatorStereoDsp},
     event::ProcEvents,
     node::{
-        AudioNode, AudioNodeInfo, AudioNodeProcessor, ProcBuffers, ProcExtra, ProcInfo,
+        AudioNode, AudioNodeInfo, AudioNodeProcessor, NodeError, ProcBuffers, ProcExtra, ProcInfo,
         ProcessStatus,
     },
 };
@@ -204,26 +204,42 @@ impl From<SubjectBytes> for HrirSource {
     }
 }
 
+/// A wrapper for [`hrtf::HrtfError`] that implements [`std::error::Error`].
+#[derive(Debug)]
+pub struct HrtfError(pub hrtf::HrtfError);
+
+impl core::fmt::Display for HrtfError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.0 {
+            hrtf::HrtfError::InvalidFileFormat => write!(f, "Failed to parse file as HRIR sphere"),
+            hrtf::HrtfError::InvalidLength(len) => write!(f, "Invalid HRIR length `{len}`"),
+            hrtf::HrtfError::IoError(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl core::error::Error for HrtfError {}
+
 impl AudioNode for HrtfNode {
     type Configuration = HrtfConfig;
 
-    fn info(&self, config: &Self::Configuration) -> AudioNodeInfo {
-        AudioNodeInfo::new()
+    fn info(&self, config: &Self::Configuration) -> Result<AudioNodeInfo, NodeError> {
+        Ok(AudioNodeInfo::new()
             .debug_name("hrtf node")
-            .channel_config(ChannelConfig::new(config.input_channels.get(), 2))
+            .channel_config(ChannelConfig::new(config.input_channels.get(), 2)))
     }
 
     fn construct_processor(
         &self,
         config: &Self::Configuration,
         cx: firewheel::node::ConstructProcessorContext,
-    ) -> impl firewheel::node::AudioNodeProcessor {
+    ) -> Result<impl firewheel::node::AudioNodeProcessor, NodeError> {
         let sample_rate = cx.stream_info.sample_rate.get();
 
         let sphere = config
             .hrir_sphere
             .get_sphere(sample_rate)
-            .expect("HRIR data should be in a valid format");
+            .map_err(HrtfError)?;
 
         let fft_buffer_len = config.fft_size.slice_count * config.fft_size.slice_len;
 
@@ -234,7 +250,7 @@ impl AudioNode for HrtfNode {
         );
 
         let buffer_size = cx.stream_info.max_block_frames.get() as usize;
-        FyroxHrtfProcessor {
+        Ok(FyroxHrtfProcessor {
             renderer,
             attenuation: self.distance_attenuation,
             attenuation_processor: DistanceAttenuatorStereoDsp::new(
@@ -247,6 +263,7 @@ impl AudioNode for HrtfNode {
             ),
             muffle_cutoff_hz: self.muffle_cutoff_hz,
             offset: self.offset,
+            previous_offset: self.offset,
             min_gain: self.min_gain,
             fft_input: Vec::with_capacity(fft_buffer_len),
             fft_output: Vec::with_capacity(buffer_size.max(fft_buffer_len)),
@@ -254,13 +271,14 @@ impl AudioNode for HrtfNode {
             prev_right_samples: Vec::with_capacity(fft_buffer_len),
             sphere_source: config.hrir_sphere.clone(),
             fft_size: config.fft_size.clone(),
-        }
+        })
     }
 }
 
 struct FyroxHrtfProcessor {
     renderer: HrtfProcessor,
     offset: Vec3,
+    previous_offset: Vec3,
     attenuation: DistanceAttenuation,
     attenuation_processor: DistanceAttenuatorStereoDsp,
     muffle_cutoff_hz: f32,
@@ -274,15 +292,7 @@ struct FyroxHrtfProcessor {
 }
 
 impl AudioNodeProcessor for FyroxHrtfProcessor {
-    fn process(
-        &mut self,
-        proc_info: &ProcInfo,
-        ProcBuffers { inputs, outputs }: ProcBuffers,
-        events: &mut ProcEvents,
-        _: &mut ProcExtra,
-    ) -> ProcessStatus {
-        let mut previous_vector = self.offset;
-
+    fn events(&mut self, info: &ProcInfo, events: &mut ProcEvents, extra: &mut ProcExtra) {
         for patch in events.drain_patches::<HrtfNode>() {
             match patch {
                 HrtfNodePatch::Offset(offset) => {
@@ -305,7 +315,7 @@ impl AudioNodeProcessor for FyroxHrtfProcessor {
                 }
                 HrtfNodePatch::SmoothSeconds(s) => {
                     self.attenuation_processor
-                        .set_smooth_seconds(s, proc_info.sample_rate);
+                        .set_smooth_seconds(s, info.sample_rate);
                 }
                 HrtfNodePatch::MinGain(g) => {
                     self.min_gain = g;
@@ -315,7 +325,14 @@ impl AudioNodeProcessor for FyroxHrtfProcessor {
                 }
             }
         }
+    }
 
+    fn process(
+        &mut self,
+        proc_info: &ProcInfo,
+        ProcBuffers { inputs, outputs }: ProcBuffers,
+        _: &mut ProcExtra,
+    ) -> ProcessStatus {
         if proc_info.in_silence_mask.all_channels_silent(inputs.len()) {
             self.attenuation_processor.reset();
 
@@ -345,9 +362,9 @@ impl AudioNodeProcessor for FyroxHrtfProcessor {
                     output: &mut self.fft_output[output_start..],
                     new_sample_vector: hrtf::Vec3::new(self.offset.x, self.offset.y, self.offset.z),
                     prev_sample_vector: hrtf::Vec3::new(
-                        previous_vector.x,
-                        previous_vector.y,
-                        previous_vector.z,
+                        self.previous_offset.x,
+                        self.previous_offset.y,
+                        self.previous_offset.z,
                     ),
                     prev_left_samples: &mut self.prev_left_samples,
                     prev_right_samples: &mut self.prev_right_samples,
@@ -357,8 +374,7 @@ impl AudioNodeProcessor for FyroxHrtfProcessor {
 
                 self.renderer.process_samples(context);
 
-                // in case we call this multiple times
-                previous_vector = self.offset;
+                self.previous_offset = self.offset;
                 self.fft_input.clear();
             }
         }
